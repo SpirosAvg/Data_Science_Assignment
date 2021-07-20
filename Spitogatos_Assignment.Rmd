@@ -1,0 +1,975 @@
+---
+title: <center> <b>🐱 Data Scientist Assignment 🐱</b></center>
+author: <center>Spiros Avgoustatos </center>
+output: html_document
+---
+<br></br>
+
+<center> This is my solution for the Data Scientist Assignment for spitogatos.gr </center>
+
+<center> The description as well as the solution of each part will be presented below in an Rmarkdown format which is practically an html document.It is my idea of providing an easy to read and convenient solution for this specific task</center>
+
+<center>You can find the clean R code , as well as the markdown file in my github profile here </center>
+
+<br></br>
+
+
+<center> ![drawing](https://cdn.spitogatos.gr/frontend/images/logo/spitogatosgr_s_logo.png){ width=25% } </center>
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+
+## libraries and data load 
+
+library(ggplot2)
+library(plotly)
+library(groupedstats)
+library(plyr)
+library(DT)
+library(doBy)
+library(caret)
+library(naniar)
+library(ggpubr)
+library(mlbench)
+library(Hmisc)
+
+
+dat<-read.csv("C:/Users/SpirosAvgoustatos/Downloads/assignment_rev2.csv")
+dat_raw<-dat
+
+```
+
+<br></br>
+<br></br>
+<br></br>
+<br></br>
+
+
+<h2><center> <u> Context </u> </center></h2> 
+
+<br></br>
+
+<b>SpaN</b> is a company that provides an online portal for real estate services. The main functionality of the portal is that property listings are published by real estate agents and visitors can search for properties based on a set of search criteria.
+
+As a <b>Data Scientist for SpaN</b>, you closely cooperate with various departments to assist in decision making and strategy execution, based on actionable insights that you get out of data.
+
+The following assignment consists of 3 parts. Each part has specific requirements and deliverables as described in the corresponding sections. The implementation needs to be either in Python or in R. After you complete the assignment, you need to provide a link to a public git repository that includes your code (in one file or several folders).
+
+<br></br>
+<br></br>
+<br></br>
+
+
+<h2><center> <u> The Dataset </u> </center></h2> 
+
+<br></br>
+
+The given <b> dataset </b> is this month’s snapshot of all the listings of residential properties (houses) for sale listed on the portal of <b> SpaN </b>  for 4 specific areas of Athens <b> (geography_name) </b> . Each listing has a <b> unique id </b>  but it can be the case that the same actual property is uploaded by multiple real estate agents so multiple different listings (with different ids) for the same property are created. <b> Each agent is identified by a unique agent_id </b>.
+
+The rank that listings are ordered by in a specific area when a user makes a search is <b> depends on the type of the listing (ad_type) and their listing score (ranking_score) </b> . There are four different listing types: <b> simple listings</b> , that appear last , <b> up listings</b> that rank above simple, <b> premium listings</b>  that rank above up, and <b> star listings </b>  that appear at the top of the list. <b> Within each listing type group properties are ranked based on the listing score</b>.
+
+The <b> size of the property (sq_meters)</b> , its <b> price</b>  and the <b> area (geography_name)</b>  are the main <b> search filters</b> that users use in their initial search. The rest of the columns of the dataset are all further attributes of the properties listed and can be used as filters on a search. The year_of_construction column represents the year that the house was built and the value <b> 2155</b>  means that the <b> house is under construction</b> .
+ 
+<br></br>
+<br></br>
+<br></br>
+
+
+<h2><center> <u> Assignment Part #1 (Marketing) </u> </center></h2> 
+
+<br></br>
+
+The <b>marketing department </b> wants to issue a <b>press release</b> regarding <b>house prices in different areas of Athens</b>. They ask if you could help them by providing some useful statistics that would show the price levels of houses for sale <b>this month</b> that real estate journalists would find useful.
+For this purpose, you will need to <b>calculate tables that show some metrics</b>, namely the <b>mean, median and standard deviation of property prices per house type (subtype) and per area (geography_name)</b>. Before you calculate the final metrics, keep in mind that you should <b>clean the dataset</b> from any entries that you think should not be included in the analysis, because they will corrupt the right image of the price levels of each area.
+
+
+
+
+```{r Part 1, include=FALSE}
+
+
+## Part 1 
+
+## check under construction
+listings_under_construction<-nrow(table(dat[dat$year_of_construction==2155,]$price))
+under_construction_percentage<-listings_under_construction/nrow(dat)
+
+
+
+# check NAs in price
+price_missing<-sum(is.na(dat$price))
+price_missing_percentage<-price_missing/nrow(dat)
+
+
+## remove under construction cause its future price  remove prices below 1000?
+price_freq<-as.data.frame(table(dat$price))
+names(price_freq)<-c("price","count")
+dat<-dat[dat$year_of_construction!=2155,]
+dat<-dat[dat$price>1000,]
+## price outliers total
+## this seems to remove 11% of northern which seems unfair since prices depend on geo
+
+
+outs<-boxplot(dat$price, plot=FALSE)$out
+
+dat_no_outliers<-dat[-which(dat$price %in% outs),]
+dat_only_outliers<-dat[which(dat$price %in% outs),]
+
+geo_out<-as.data.frame(table(dat_only_outliers$geography_name))
+geo_count<-as.data.frame(table(dat$geography_name))
+
+names(geo_out)<-c("geography_name","count_outliers")
+names(geo_count)<-c("geography_name","count")
+
+merged_geo_out<-merge(geo_out,geo_count,by="geography_name")
+
+merged_geo_out$removed_percentage<-merged_geo_out$count_outliers/merged_geo_out$count
+
+no_out_len<-nrow(dat_no_outliers)
+no_outliers_keep_percentage<-no_out_len/nrow(dat)
+
+
+# remove outliers per geo 
+## these seems more balanced
+
+geo_names<-as.data.frame(table(dat$geography_name))
+names(geo_names)<-c("geography_name","count")
+geo_names<-geo_names[,1]
+
+dat_per_geo<-list()
+dat_per_geo_no_outliers<-list()
+dat_per_geo_only_outliers<-list()
+merged_geo_per_geo<-list()
+
+for (i in 1:length(geo_names)) {
+  
+  dat_per_geo[[i]]<-dat[dat$geography_name==geo_names[i],]
+  
+  outs_temp<-boxplot(dat_per_geo[[i]]$price, plot=FALSE)$out
+  
+  dat_per_geo_no_outliers[[i]]<-dat_per_geo[[i]][-which(dat_per_geo[[i]]$price %in% outs_temp),]
+  dat_per_geo_only_outliers[[i]]<-dat_per_geo[[i]][which(dat_per_geo[[i]]$price %in% outs_temp),]
+  
+  geo_out_temp<-as.data.frame(table(dat_per_geo_only_outliers[[i]]$geography_name))
+  geo_count_temp<-as.data.frame(table(dat_per_geo[[i]]$geography_name))
+  
+  names(geo_out_temp)<-c("geography_name","count_outliers")
+  names(geo_count_temp)<-c("geography_name","count")
+  
+  merged_geo_per_geo[[i]]<-merge(geo_out_temp,geo_count_temp,by="geography_name")
+  
+  merged_geo_per_geo[[i]]$removed_percentage<-merged_geo_per_geo[[i]]$count_outliers/merged_geo_per_geo[[i]]$count
+  
+}
+
+merged_geo_per_geo<-do.call("rbind",merged_geo_per_geo)
+dat_per_geo_no_outliers<-do.call("rbind",dat_per_geo_no_outliers)
+final_percentage_kept<-nrow(dat_per_geo_no_outliers)/nrow(dat)
+final_percentage_kept_raw<-nrow(dat_per_geo_no_outliers)/nrow(dat_raw)
+
+names(merged_geo_out)<-c("Geography Name","Count of Outliers","Count of Total Listings","Removed Listings Percentage")
+
+names(merged_geo_per_geo)<-c("Geography Name","Count of Outliers","Count of Total Listings","Removed Listings Percentage")
+
+
+
+
+
+
+
+
+
+
+## Group Summaries
+both_groups<-grouped_summary(
+  data = dat_per_geo_no_outliers,
+  grouping.vars = c(subtype,geography_name),
+  measures = price,
+  measures.type = "numeric"
+)
+
+subtype_group<-grouped_summary(
+  data = dat_per_geo_no_outliers,
+  grouping.vars = c(subtype),
+  measures = price,
+  measures.type = "numeric"
+)
+
+geo_group<-grouped_summary(
+  data = dat_per_geo_no_outliers,
+  grouping.vars = c(geography_name),
+  measures = price,
+  measures.type = "numeric"
+)
+
+
+both_groups<-both_groups[,c(1,2,7,8,9,11,13,14)]
+subtype_group<-subtype_group[,c(1,6,7,8,10,12,13)]
+geo_group<-geo_group[,c(1,6,7,8,10,12,13)]
+
+
+```
+
+<br></br>
+<br></br>
+
+#### <b> Solution of Part 1 </b>
+
+#### <b> Data Cleaning </b>
+
+<font color=#3498DB>
+<b>
+ 
+After examining the dataset for this part , i decided to remove some rows concerning non applicable values for this month & outlier prices
+
+The logic behind removing rows is as follows : 
+  
+  - First of all ,everything concerning under construction prices was removed from the analysis. This tasks requires an analysis on the prices of this month , thus , including under construction (future) prices did not seem realistic. Then some listings below 1000 euros were removed as unrealistic too 
+  
+  - Then outlier prices were removed. Prices out of +/- 1.5*IQR range were removed as outliers but not for the entire dataset. Prices were removed specifically for each different geography_name group.
+  
+<u>Explanation:</u>
+
+If outlier prices were removed across the entire dataset , then we would see that ~0% of beesy neighborhood listings would be removed , 1% for  gentrification areas  but 8% and 10% of south beach and northern sub respectively. 
+
+This propably happens due to these 2 areas being more expensive by default so it is common sense that they will have the most outliers accros the dataset . But since we need an analysis by geography it seemed more fair to remove outliers inside each geography name. 
+
+If we do the same removal method but splitting the data by geography name , the percentages removed go as follows : beesy neighborhood (8%) , gentrification area (9.5%) ,northern sub (7.5%) ,south beach (8.7%) which seems a lot more balanced.
+
+</b>
+</font>
+
+<br></br>
+<br></br>
+
+```{r Part 1 tables, echo=FALSE}
+
+
+
+datatable(
+  merged_geo_out, options = list(dom = 't'),
+  caption = 'Table 1: Removing outliers across the entire dataset.'
+)%>%
+  formatPercentage('Removed Listings Percentage', 2)
+
+
+
+datatable(
+  merged_geo_per_geo, options = list(dom = 't'),
+  caption = 'Table 2: Removing outliers inside each Geography Name.'
+)%>%
+  formatPercentage('Removed Listings Percentage', 2)
+
+```
+
+
+<br></br>
+<br></br>
+
+####  <b>Price Analysis </b>
+
+
+
+<font color=#3498DB>
+<b>
+
+After doing the exclusion of the rows that apply to the foretold creteria (under_construction,undrealistically low prices,outliers) we end up with around 88% of the starting raw dataset and we can start exploring the prices in the requested groups:
+
+</b>
+</font>
+
+#### By Geography Name 
+
+```{r Part 1 tables geotype 1, echo=FALSE,message=FALSE,warning=FALSE}
+
+geo_group<-geo_group[order(-geo_group$n),]
+
+datatable(
+  geo_group, options = list(dom = 't'),
+  caption = 'Table 3: Prices per Geography Name (Ordered by number of listings)'
+)%>%
+   formatCurrency(c('mean', 'sd','median','max'), '€')
+
+
+```
+<br>
+</br>
+```{r Part 1 tables geotype 2, echo=FALSE,message=FALSE,warning=FALSE}
+plot_ly(dat_per_geo_no_outliers, y = ~price, color = ~reorder(geography_name,price), type = "box")%>% 
+layout(autosize=FALSE, width = 900, height = 500,title = 'Boxplot of Prices per Geography Name',
+         xaxis = list(title = 'Geography Name',
+                      zeroline = TRUE
+                      ),
+         yaxis = list(title = 'Price'
+                      ))
+
+```
+<br>
+</br>
+```{r Part 1 tables geotype 3, echo=FALSE,message=FALSE,warning=FALSE}
+plot_ly(geo_group,x=~reorder(geography_name,median), y = ~median, color = ~reorder(geography_name,median), type = "bar")%>% layout(autosize=FALSE, width = 900, height = 500,title = 'Median Prices for each Geography Name',
+         xaxis = list(title = 'Geography Name',
+                      zeroline = TRUE
+                      ),
+         yaxis = list(title = 'Median Price'
+                      ))
+
+```
+<br>
+</br>
+<br>
+</br>
+
+
+#### By Subtype
+
+
+```{r Part 1 tables subtype 1, echo=FALSE,message=FALSE,warning=FALSE}
+
+
+
+
+subtype_group<-subtype_group[order(-subtype_group$n),]
+
+datatable(
+  subtype_group, options = list(dom = 't'),
+  caption = 'Table 4: Prices per Subtype (Ordered by number of listings)'
+)%>%
+  formatCurrency(c('mean', 'sd','median','max','min'), '€')
+
+
+
+```
+<br>
+</br>
+```{r Part 1 tables subtype 2, echo=FALSE,message=FALSE,warning=FALSE}
+
+plot_ly(dat_per_geo_no_outliers, y = ~price, color = ~reorder(subtype,price), type = "box")%>% 
+layout(autosize=FALSE, width = 900, height = 500,title = 'Boxplot of Prices per Subtype',
+         xaxis = list(title = 'Subtype',
+                      zeroline = TRUE
+                      ),
+         yaxis = list(title = 'Price'
+                      ))
+
+```
+<br>
+</br>
+```{r Part 1 tables subtype 3, echo=FALSE,message=FALSE,warning=FALSE}
+plot_ly(subtype_group, x=~reorder(subtype,median),y = ~median, color = ~reorder(subtype,median), type = "bar")%>% layout(autosize=FALSE, width = 900, height = 500,title = 'Median Prices for each Subtype',
+         xaxis = list(title = 'Subtype',
+                      zeroline = TRUE
+                      ),
+         yaxis = list(title = 'Median Price'
+                      ))
+```
+
+<br>
+</br>
+
+#### Detailed Table by both Geography & Subtype
+
+```{r Part 1 tables both 1, echo=FALSE,message=FALSE,warning=FALSE}
+
+both_groups<-both_groups[order(-both_groups$n),]
+
+datatable(
+  both_groups,
+  caption = 'Table 4: Prices per Subtype (Ordered by number of listings)'
+)%>%
+  formatCurrency(c('mean', 'sd','median','max','min'), '€')
+
+```
+
+
+
+
+<br></br>
+<br></br>
+<br></br>
+
+
+<font color=#3498DB> 
+<b>
+
+Comments for the Marketing Team : 
+
+ - A listing residing in Northern Subs is on average 6.2 times higher than a listing in beesy neighborhood
+ - Villas cost almost as much as an entire Appartment Complex (~900k euros)
+ - As median prices go higher , their fluctuations are getting bigger as well . Meaning that in geographies or subtypes with higher prices , sd is higher as well.
+ - Most of the listings concern apartments in the south beach with a median price of 330 k euros 
+ - The listing with the highest price is a maisonette in the nothern subs valued at 1.65 M euros , while the listing with the lowest price is a studio residing in beesy neighborhood valued at 8k euros
+
+ 
+</b>
+</font>
+
+
+<br></br>
+<br></br>
+<br></br>
+
+
+
+
+<h2><center> <u> Assignment Part #2 (Sales) </u> </center></h2> 
+
+<br></br>
+
+The <b>Sales Manager</b> of <b>SpaN </b>, after conducting qualitative research, by asking different agents in each area in Athens, wants to examine the possibility of <b>offering special discounts</b> for some listing types, based on the competitiveness of each area. To decide what type of discount should be given to agents in each area she would need to see an <b>analysis of the competitiveness of each area</b>.
+A highly competitive area would mean that it would be <b>hard for a simple listing to rank high</b> in the search results of this area just by having a high ranking score.
+To<b> help the sales manager decide</b> the level of discount to be given to agents in each area, you would need to:
+
+-	Identify and calculate some <b>competitiveness metrics</b> that would show the level of difficulty for a listing to rank high in a specific area
+-	<b>Plot those metrics in graphs</b> that you believe would convey the right information to the sales manager, to be able to make the right decisions
+
+
+```{r Part 2, include=FALSE}
+
+
+dat2<-dat_raw[dat_raw$price>1000,]
+
+
+
+
+### per area total
+ad_freq_per_geo<-data.frame(table(dat2$geography_name, dat2$ad_type))
+names(ad_freq_per_geo)<-c("geography_name","ad_type","count")
+
+ad_freq<-data.frame(table(dat2$geography_name))
+names(ad_freq)<-c("geography_name","count_of_ad")
+
+ad_freq_merged<-merge(ad_freq_per_geo,ad_freq,by="geography_name")
+ad_freq_merged$percent_in_geo<-ad_freq_merged$count/ad_freq_merged$count_of_ad
+average_ranking_per_geo_ad_type<-summaryBy(ranking_score ~ geography_name + ad_type, dat2, FUN=median)
+comp_tables<-merge(ad_freq_merged,average_ranking_per_geo_ad_type,by=c("geography_name","ad_type"))
+
+comp_tables$ad_type_ordinal<-0
+comp_tables[comp_tables$ad_type=="up",]$ad_type_ordinal<-1
+comp_tables[comp_tables$ad_type=="premium",]$ad_type_ordinal<-2
+comp_tables[comp_tables$ad_type=="star",]$ad_type_ordinal<-3
+
+comp_tables$vs_score<-1-comp_tables$percent_in_geo
+
+
+comp_tables_per_geo<-split(comp_tables,ad_freq_merged$geography_name)
+
+area_score_table<-list()
+
+for (i in 1:length(comp_tables_per_geo)){
+  
+  temp<-comp_tables_per_geo[[i]][comp_tables_per_geo[[i]]$ad_type_ordinal==0,]$ranking_score.median
+  comp_tables_per_geo[[i]]$vs_score2<-temp/comp_tables_per_geo[[i]]$ranking_score.median-1
+  
+  comp_tables_per_geo[[i]]<-comp_tables_per_geo[[i]][comp_tables_per_geo[[i]]$ad_type_ordinal!=0,]
+  
+  comp_tables_per_geo[[i]]$ad_type_opportunity_score<-comp_tables_per_geo[[i]]$vs_score/abs(comp_tables_per_geo[[i]]$vs_score2)
+  
+  comp_tables_per_geo[[i]]$area_opportunity_score<-mean(comp_tables_per_geo[[i]]$ad_type_opportunity_score)
+  
+  area_score_table[[i]]<-as.data.frame(cbind(as.character(unique(comp_tables_per_geo[[i]]$geography_name)),comp_tables_per_geo[[i]]$area_opportunity_score[1]))
+  
+ names(area_score_table[[i]])<-c("geography_name","area_score")
+}
+
+
+
+comp_tables_per_geo<-do.call("rbind",comp_tables_per_geo)
+area_score_table<-do.call("rbind",area_score_table)
+area_score_table$area_score<-as.numeric(as.character(area_score_table$area_score))
+
+```
+
+<br></br>
+<br></br>
+
+
+
+#### <b> Solution of Part 2 </b>
+
+#### <b> The though behind the creation of the area & ad_type opportunity scores </b>
+
+<font color=#3498DB>
+<b>
+ 
+
+After examining the dataset for this part , i decided to create a competition metric called opportunity score based on 2 combined key factors.
+Opportunity score measures if a simple listing ad would do great if it became up,premium,or star listing. 
+
+This means that if we get 
+high opportunity score values the competitiveness in upper tiers of ad_types is lower so the opportunity to make them paid is bigger cause according to their ranking they would rank in a good position in the selected ad_type. 
+
+On the contrary low opportunity scores means that the area is quite competitive and even if the simple ad became paid it would have minor results in its ranking ,besides of course going above all other simple listings.
+
+Having said that here are the 2 key factors used in the opportunity score creation:
+
+  1. Measuring the volume of paid ad types in each area  
+  2. Measuring the percentage difference of the median ranking score between simple and paid ads in each geography name 
+  
+For <u>number 1 </u> the metric type is : (1 - percent of ad_type in area) 
+  - eg. (In beesy neighborhood  there are 2182 listings , 34 (1.55%)  up listings , 30 (1.37%)  star & 44 (2%) premium listings)
+  - Their score would be 1-0.0155=0.9845 for up listings  etc. 
+
+For <u>number 2 </u> the metric type is : (median(ranking_score of simple listings) / median(ranking_score of up or premium or star listings)  ) -1 
+  - eg. (In beesy neighborhood  the median simple ranking score is 116.15, median ranking score of up listigns is 113.1.  Thus (116.15/113.1)-1  = 0.026 )
+  
+So the opportunity score of simple listing ads in beesy neighborhood for up listings would be 0.9845/0.026 = ~ 37 
+
+Calculating the mean score of each ad_type in a geography name gives as our area opportunity score as well.
+
+
+
+</b>
+</font>
+
+
+<br>
+</br>
+<br>
+</br>
+
+
+#### Results
+
+<br>
+</br>
+
+```{r Part 2 area_scores,fig.width=8,fig.height=4, echo=FALSE,message=FALSE,warning=FALSE}
+
+ggplotly(ggplot(area_score_table,aes(x=reorder(geography_name,area_score),y=area_score,fill=area_score))+geom_bar(stat="identity")+
+  ylab("Opportunity Score")+
+  xlab("Geography Name")+
+     geom_text(nudge_y = 0.5,
+    label=paste(round(area_score_table$area_score,2)), 
+    check_overlap = F ,show.legend = FALSE
+  )+
+  ggtitle("Competitiveness per Area")
+)
+
+```
+
+
+
+
+<br>
+</br>
+
+<br>
+</br>
+
+```{r Part 2 ad_type scores,fig.width=13,fig.align="center",echo=FALSE,message=FALSE,warning=FALSE}
+ggplotly(
+  
+  ggplot(comp_tables_per_geo,aes(x=reorder(ad_type,-ad_type_opportunity_score),y=ad_type_opportunity_score,fill=ad_type_opportunity_score))+
+    geom_bar(stat="identity")+
+    ylab("Opportunity Score")+
+    xlab("Ad Type")+
+       geom_text(nudge_y = 1,
+      label=paste(round(comp_tables_per_geo$ad_type_opportunity_score,2)), 
+      check_overlap = F ,show.legend = FALSE
+    )+
+    ggtitle("Competitiveness per Ad type in Areas")+
+    facet_wrap(~geography_name,1)
+)
+```
+
+<br></br>
+<br></br>
+<br></br>
+
+
+<font color=#3498DB> 
+<b>
+
+Comments for the Sales Team : 
+
+ - South Beach & Beesy Neighborhood have the biggest Opportunity score, thus it is suggested for agents to try and make simple listings paid inside these 2 areas 
+ - In South Beach it is recommended to try and make simple listings , star listings because they will not only rank above up  & premium but many ads will rank well inside the star category as well 
+ -In Beesy neighborhood it is recommended to try and make simple listings either up or star listings 
+ - Gentrification area seems to have the biggest competition ( low area opportunity score ~ 6 ) .Even if we provide discounts here listings will have difficulty ranking in paid types as well
+ - Simple listings in Northern subs , while having a lower area opportunity score than south beach or beesy neighborhood , have a ranking score pretty similar to star listings inside the area. So it is recommended to have discounts from simple to star type ads
+ 
+
+ 
+</b>
+</font>
+
+<br></br>
+<br></br>
+<br></br>
+
+
+
+
+<h2><center> <u> Assignment Part #3 (Product) </u> </center></h2> 
+
+<br></br>
+
+The <b>product team</b> of <b>SpaN</b> wants to launch a <b>new page on the portal</b> that would help agents decide the <b>correct price</b> they should set for a property for sale <b>in Athens</b>. The agent would need to input certain attributes of a property and <b>an algorithm would value the property</b>, based on historical data. The team is building an <b>MVP (minimum viable product)</b> that would be launched in beta, in order to <b> measure the willingness of agents to use the new page </b> and get <b>feedback on the accuracy of the predictions</b>, based on the experience of agents in the market.
+
+They ask if you could help them identify what are the <b>most important attributes that an agent would have to input</b> to get a valid prediction of a property’s price valuation and also build the model that would predict the value (price).
+
+Using the data from the given dataset:
+-	<b>Identify the most important attributes</b> in predicting the price of a property.
+-	<b>Build a model that valuates each residential property</b>
+
+
+```{r Part 3, include=FALSE}
+
+## prepare data for ml 
+
+mldat<-dat_no_outliers[dat_no_outliers$year_of_construction!=0,]
+mldat<-mldat[mldat$sq_meters<20000,]
+mldat<-mldat[mldat$year_of_construction>1920,]
+mldat<-mldat[mldat$sq_meters<1500,]
+
+
+dat_no_outliers[dat_no_outliers$energy_class=="",]$energy_class<-NA
+
+
+# subset data for ml after missing analysis
+
+mldat<-mldat[,c(6,4,5,7,8,10,11,13,14,16,17,18)] ## maybe to use ? 16:56
+
+#recode floor 
+
+mldat[mldat$floor=="basement",]$floor<-1
+mldat[mldat$floor=="semi-basement",]$floor<-0.5
+mldat[mldat$floor=="ground-floor",]$floor<-0
+mldat[mldat$floor=="mezzanine",]$floor<-0.5
+
+# remove nas from renovation
+mldat[is.na(mldat$renovation_year)==TRUE,]$renovation_year<-0
+
+mldat$floor<-as.numeric(mldat$floor)
+
+
+
+dmy <- dummyVars(" ~ .", data = mldat,fullRank = T) 
+mldat_transformed <- data.frame(predict(dmy, newdata = mldat))
+
+
+
+inTraining<-createDataPartition(1:nrow(mldat_transformed), p = 0.80,list = FALSE)
+training<-mldat_transformed[ inTraining,]
+test<-mldat_transformed[-inTraining,]
+
+
+
+
+subsets <- c(2:14)
+control <- rfeControl(functions=lmFuncs, method="repeatedcv",repeats=5,number=10)
+choose_vars<-rfe(x=mldat_transformed[,c(2:14)], y=mldat_transformed$price,sizes=subsets,
+                 rfeControl = control)
+
+
+training<-training[,c("price",choose_vars$optVariables)]
+test<-test[,c("price",choose_vars$optVariables)]
+
+fitControl <-trainControl(method="repeatedcv", repeats=5,number=10)
+
+### exclude less important variables
+
+training<-training[,-c(9,11)]
+test<-test[,-c(9,11)]
+
+model <- train(price~.,data =training, method='lm',preProcess=c("center","scale"),trControl= fitControl,na.action = na.omit)
+
+importance<-varImp(model,value="rss")
+
+
+## test evaluation 
+test<-test[complete.cases(test),]
+test$predictions<- predict(model, test[,-1])
+
+test$absolute_error<-(abs((test$predictions/test$price)-1))*100
+
+
+
+## in training evaluation
+
+
+training$predictions<- predict(model, training[,-1])
+
+training$absolute_error<-(abs((training$predictions/training$price)-1))*100
+
+
+mape<-mean(test$absolute_error)
+mape_t<-mean(training$absolute_error)
+
+
+temp1<-rep("Actuals",length(test$price))
+temp2<-rep("Predictions",length(test$price))
+
+
+temp3<-data.frame(test$price,temp1,1:length(test$price))
+temp4<-data.frame(test$predictions,temp2,1:length(test$price))
+
+names(temp3)<-c("Price","Type","x_axis")
+names(temp4)<-c("Price","Type","x_axis")
+
+test_to_plot<-rbind(temp3,temp4)
+
+
+
+
+
+
+
+```
+
+
+
+<br></br>
+<br></br>
+
+
+
+#### <b> Solution of Part 3 </b>
+
+#### <b> Data specifics  </b>
+
+<font color=#3498DB> 
+<b>
+
+First of all as a dataset already cleaned by outliers in price, i chose to use the cleaned per geography dataset from Part 1 used for the marketing report
+
+The split between training and test set used is 80%-20% respectively.
+
+Then we perform an NA analysis which variables we can use as predictors for the price in order to build the model and identify the most important variables in it.
+
+
+</b>
+</font>
+
+
+<br></br>
+<br></br>
+
+
+```{r Part 3 missing values exploration ,echo=FALSE,message=FALSE,warning=FALSE}
+
+gg_miss_var(dat_no_outliers)+ggtitle("Columns with most NA's")
+```
+
+
+
+```{r Part 3 missing values exploration2 ,echo=FALSE,message=FALSE,warning=FALSE}
+
+
+
+vis_miss(dat_no_outliers)+ggtitle("NA's in Columns")
+
+
+
+```
+<br></br>
+<br></br>
+
+<font color=#3498DB> 
+<b>
+
+As we can see all variables after balcony area have almost more than 10% of their entirety missing , thus they are all excluded from the analysis in order to minimize the effort into building the model.
+
+Energy class is also removed , while renovation year is kept accepting that if the listing was not renovated it gets the value 0 instead of NA 
+
+We will also exclude irrelevant features as id,ranking_score,agent_id keeping only characteristics of each house 
+
+<br></br>
+<br></br
+
+#### <b> Model Specifics  </b>
+
+To perform the predictions a simple linear regression model is selected due to easy interpretability and implementation. 
+
+The numeric data were all centered and scaled , while categorical data were transformed into dummy variables meaning, a factor with 2 categories will break up to 2 different binary columns one for each category.
+
+To select the optimal number of the remaining features an rfe method was implemented ([recursive feature elimination](http://topepo.github.io/caret/recursive-feature-elimination.html#rfe))
+
+The rfe function suggest that we keep all the 13 features in our model but we can see (Tabe 5) that 
+if we keep 11 we get almost the same results in RMSE,R-Squared and the sd of R-squared is the same. So i decided to keep the 11 most important . (Practically it is even less than eleven (8) since subsets of geography name are stand alone variables after data transformation of factors to dummy variables)
+
+
+To plot the importance of each feature i used the [varImp](https://topepo.github.io/caret/variable-importance.html) function which uses  the absolute value of the t-statistic for each model parameter that is used. 
+
+
+</b>
+</font>
+
+
+<br></br>
+<br></br>
+
+
+```{r Part 3 choose vars ,fig.width=13,fig.align="center",echo=FALSE,message=FALSE,warning=FALSE}
+
+datatable(
+  choose_vars$results,
+  caption = 'Table 5: Choose Number of Feature via rfe.'
+)%>%
+  formatRound('RMSE', 2)%>%
+  formatRound('Rsquared', 3)%>%
+  formatRound('RMSE', 2)%>%
+  formatRound('MAE', 2)%>%
+  formatRound('RsquaredSD', 3)%>%
+  formatRound('MAESD', 2)
+
+
+```
+
+
+
+<br></br>
+<br></br>
+
+<br></br>
+<br></br>
+
+
+```{r Part 3 choose vars2 ,fig.align="center",echo=FALSE,message=FALSE,warning=FALSE}
+
+plot(importance)
+```
+
+
+<font color=#3498DB> 
+<b>
+
+By taking into account the above information in the final model we include (ordered by importance)
+  
+  - Square Meters
+  - Geography Name
+  - Year of Construction
+  - Number of Bathrooms
+  - Rooms
+  - Number of Wcs
+  - Kitchens
+  - Balcony Area
+  
+The model by these variables has an R-Squared of around 0.66 (This means that the features selected explain 66% of the variance of Price, which is a considerable value but still has a lot room for improvement)  & an RMSE (root mean squared error) of 4910.12 euros , while the average prediction is from 30-35 % of the actual price
+
+</b>
+</font>
+
+
+<br></br>
+<br></br>
+
+
+#### <b> Model Evaluation  </b>
+
+<br></br>
+<br></br>
+
+#### Here is a visualization of how close each prediction is to the real price of the listing 
+#### With blue you can see the predictions while with green the actual prices , try and use the "Compare Data on Hover" button for  better experience
+
+```{r Part 3 model evaluation ,fig.width=13,fig.align="center",echo=FALSE,message=FALSE,warning=FALSE}
+
+f <- list(
+  family = "Courier New, monospace",
+  size = 18,
+  color = "#7f7f7f"
+)
+
+x <- list(
+  title = "Number of Observation in Dataset",
+  titlefont = f
+)
+y <- list(
+  title = "Price",
+  titlefont = f
+)
+
+fig <- plot_ly(test_to_plot, x = ~reorder(x_axis,Price), y = ~Price, color = ~Type) 
+fig <- fig %>% add_lines()
+fig%>% layout(xaxis = x, yaxis = y)
+```
+
+<br></br>
+
+<br></br>
+<br></br>
+<br></br>
+
+
+<font color=#3498DB> 
+<b>
+
+Comments for the Product team & the Agents
+
+Both the product team & the Agents should be aware that the current version of this model , overestimates prices for low value listings and underestimates prices for high value listings , it is even possible for some low value listings to have predictions below 0 which is something definitely not optimal. 
+
+On the other hand we created a model that runs only on 8 out of around 50 starting variables and still has a kind of good fit to the actual prices 
+
+  - We should run this in Beta and have the agents cross-validate these weaknesses in the real world 
+  - We expect the satisfaction for this to be higher for agents that manage listings of average prices and lower for agents who manage corner case listings (either of high or low value)
+  
+</b>
+</font>
+
+
+<br></br>
+<br></br>
+
+<br></br>
+<br></br>
+
+
+#### <b> Future Steps </b>
+
+<font color=#3498DB> 
+<b>
+
+After the first beta iteration there is a lot of room for improvement:
+
+We could 
+  
+  - Try other data cleaning method , play around more with corner cases 
+  - Split our model into the four main geography areas
+  - Try imputing some of the missing values and include more features to see if they improve predictions
+  - Create price categories and create classification models to predict price ranges and not do point estimations like in regression
+  - Create clusters of listings with similar characteristics , classify new listings to these clusters and then try to predict their prices by creating a model for each cluster 
+  
+  
+  
+  </b>
+</font>
+  
+<br></br>
+
+<br></br>
+<br></br>
+<br></br>
+<br></br>
+
+<br></br>
+<br></br>
+<br></br>
+<br></br>
+
+
+
+  
+  <center>📈 <b> Thank you for your time </b> 📈</center> 
+
+
+<br></br>
+<br></br>
+<br></br>
+<br></br>
+
+<br></br>
+<br></br>
+<br></br>
+<br></br>
+<br></br>
+<br></br>
+<br></br>
+<br></br>
+
+<br></br>
+<br></br>
+<br></br>
+<br>
